@@ -1,0 +1,141 @@
+---
+title: "Spam: modelo logístico y curvas ROC"
+output: pdf_document
+---
+
+
+Leemos los datos
+
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(tidyr)
+library(dplyr)
+spam_entrena <- read_csv('./datos/spam-entrena.csv')
+spam_prueba <- read_csv('./datos/spam-prueba.csv')
+```
+
+### 1. Modelo sólo utilizando las variables caracteres
+
+Vamos a utilizar un modelo logístico para estimar si es spam o no en función de las variables cfsc, cfpar, etc
+
+```{r,warning=FALSE}
+logistico <- glm(spam ~ cfsc+cfpar+cfbrack+cfexc+cfdollar+
+                   cfpound,data=spam_entrena, family = 'binomial')
+summary(logistico)
+```
+
+```{r,message=FALSE}
+preds_prueba <- predict(logistico,newdata = spam_prueba , type="response")
+preds_entrena<-predict(logistico, newdata=spam_entrena,type="response")
+```
+
+Construimos la curva ROC (prueba):
+
+```{r,message=FALSE}
+library(ROCR)
+library(ggplot2)
+pred_rocr_1 <- prediction(preds_prueba, spam_prueba$spam) 
+perf_1 <- performance(pred_rocr_1, measure = "sens", x.measure = "fpr") 
+graf_roc_1 <- data_frame(tfp = perf_1@x.values[[1]], sens = perf_1@y.values[[1]], 
+                       d = perf_1@alpha.values[[1]])
+
+ggplot(graf_roc_1, aes(x = tfp, y = sens, colour=d)) + geom_point() +
+  xlab('1-especificidad') + ylab('Sensibilidad') 
+```
+
+Curva ROC (entrenamiento):
+
+```{r,message=FALSE}
+library(ROCR)
+pred_rocr_2 <- prediction(preds_entrena, spam_entrena$spam) 
+perf_2 <- performance(pred_rocr_2, measure = "sens", x.measure = "fpr") 
+graf_roc_2 <- data_frame(tfp = perf_2@x.values[[1]], sens = perf_2@y.values[[1]], 
+                       d = perf_2@alpha.values[[1]])
+
+ggplot(graf_roc_2, aes(x = tfp, y = sens, colour=d)) + geom_point() +
+  xlab('1-especificidad') + ylab('Sensibilidad') 
+```
+
+### 2. Modelo utilizando todas las variables
+
+Constuimos el modelo usando todas las variables:
+
+```{r,warning=FALSE}
+logistico_todas <- glm(spam ~.,data=spam_entrena, family = 'binomial')
+summary(logistico_todas)
+```
+
+```{r,message=FALSE}
+preds_prueba_todas <- predict(logistico_todas,newdata = spam_prueba , type="response")
+preds_entrena_todas<-predict(logistico_todas, newdata=spam_entrena,type="response")
+```
+
+Construimos la curva ROC (prueba) utilizando todas las variables:
+
+```{r,message=FALSE}
+library(ROCR)
+library(ggplot2)
+pred_rocr_3 <- prediction(preds_prueba_todas, spam_prueba$spam) 
+perf_3 <- performance(pred_rocr_3, measure = "sens", x.measure = "fpr") 
+graf_roc_3 <- data_frame(tfp = perf_3@x.values[[1]], sens = perf_3@y.values[[1]], 
+                       d = perf_3@alpha.values[[1]])
+
+ggplot(graf_roc_3, aes(x = tfp, y = sens, colour=d)) + geom_point() +
+  xlab('1-especificidad') + ylab('Sensibilidad') 
+```
+
+Curva ROC (entrenamiento) utilizando todas las variables:
+
+```{r,message=FALSE}
+library(ROCR)
+pred_rocr_4 <- prediction(preds_entrena_todas, spam_entrena$spam) 
+perf_4 <- performance(pred_rocr_4, measure = "sens", x.measure = "fpr") 
+graf_roc_4 <- data_frame(tfp = perf_4@x.values[[1]], sens = perf_4@y.values[[1]], 
+                       d = perf_4@alpha.values[[1]])
+
+ggplot(graf_roc_4, aes(x = tfp, y = sens, colour=d)) + geom_point() +
+  xlab('1-especificidad') + ylab('Sensibilidad') 
+```
+
+### 3. Graficamos las dos curvas ROC de prueba:
+
+```{r}
+graf_roc_3$modelo <- 'Todas las variables'
+graf_roc_1$modelo <- 'Solo caracteres'
+graf_roc <- bind_rows(graf_roc_1, graf_roc_3)
+
+ggplot(graf_roc, aes(x = tfp, y = sens, colour = modelo)) + geom_point() +
+  xlab('1-especificidad') + ylab('Sensibilidad') 
+```
+
+Resulta superior el modelo utilizando todas las variables, en pimera instancia pues el que sólo tiene caracteres no completa la curva ROC y en segundo lugar el clasificador que usa todas las variables domina siempre al clasificador que sólo utiliza las variables caracteres; es decir, para cualquier punto de corte siempre existe un clasificador en la curva azul (todas las variables) que domina al que sólo tiene la variable caracter.
+
+### 4. Punto de corte apropiado para hacer un filtro de spam
+
+En mi opinion resulta más grave que un mail sea catalogado como spam cuando no lo es pues en este caso podría ser un mail importante que se fue directo a la papelera de reciclaje sin que lo hayamos siquiera visto; es decir, me parece que son mucho más graves los falsos positivos. En virtud de lo anterior, considero que debemos escoger un punto de corte con especifidad más grande y con sensibilidad más chica por lo que escogeré como punto de corte $d=0.8$
+
+La tabla considerando este punto de corte quedaría como sigue:
+
+```{r}
+table(preds_prueba_todas > 0.8, spam_prueba$spam)
+```
+
+Y la proporción con $d=0.8$:
+
+```{r}
+prop.table(table(preds_prueba_todas > 0.8, spam_prueba$spam),2)
+```
+
+A continuación incluyo la table con $d=0.5$ para contrastar:
+
+```{r}
+table(preds_prueba_todas>.5, spam_prueba$spam)
+```
+
+Finalmente la proporción con $d=0.5$:
+
+```{r}
+prop.table(table(preds_prueba_todas > 0.5, spam_prueba$spam),2)
+```
+
+Como conclusión podemos establecer que aunque eliminamos casi por completo los falsos positivos, vamos a estar recibiendo mucho spam, por lo que el costo de no clasificar un correo "bueno" como spam va a ser tener que estar trasladando manualmete el spam a la papelera de reciclaje.
