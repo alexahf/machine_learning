@@ -1,0 +1,76 @@
+---
+title: "Spam: Ridge y lasso"
+output: pdf_document
+---
+
+Leemos los datos:
+
+```{r, message=FALSE, warning=FALSE}
+library(readr)
+library(tidyr)
+library(dplyr)
+spam_entrena <- read_csv('./datos/spam-entrena.csv')
+spam_prueba <- read_csv('./datos/spam-prueba.csv')
+```
+
+Corremos la regresión ridge:
+
+```{r}
+library(glmnet)
+x_e <- spam_entrena %>% select( -spam) %>% as.matrix
+x_p <- spam_prueba %>% select( -spam) %>% as.matrix
+mod_ridge <- glmnet(x = x_e, y = spam_entrena$spam, 
+  alpha = 0, #ridge
+  family='binomial', intercept = T, nlambda=50) #normalmente ponemos intercept = T
+dim(coef(mod_ridge))
+```
+
+Observamos cómo se encogen los coeficientes para distintos valores de $\lambda$:
+
+```{r}
+plot(mod_ridge, xvar='lambda')
+```
+
+
+Para escoger el valor adecuado de $\lambda$, calculamos la devianza 
+bajo la muestra de prueba:
+
+```{r}
+devianza  <- function(p, y){
+  -2*mean(y * log(p) + (1-y) * log(1 - p))
+}
+# predict en glmnet produce probabilidades para los 50 modelos
+preds_ridge <- predict(mod_ridge, newx = x_p, type = 'response')
+
+head(preds_ridge)
+tail(preds_ridge)
+
+df_lambdas <- data_frame(modelo = attr(mod_ridge$a0, 'names'), 
+                         lambda = mod_ridge$lambda)
+
+
+devianzas_prueba <- preds_ridge %>% group_by(modelo) %>%
+  summarise( devianza = devianza(prob, spam)) %>% left_join(df_lambdas)
+
+ggplot(devianzas_prueba, aes(x = lambda, y= devianza)) + 
+  scale_x_log10(breaks = round(2^seq(-5,5,1),2)) +
+  geom_point()
+```
+
+El modelo final quedaría como sigue:
+
+```{r}
+df_lambdas 
+coefs_selec <- coef(mod_ridge)[-1, 's38']
+pred_prueba_final <- h(spam_prueba %*% coefs_selec)
+tab_confusion <- table(pred_prueba_final > 0.5, dat_p$y)
+tab_confusion
+prop.table(tab_confusion, margin=2)
+```
+
+Repite el ejercicio de spam (con todas las variables), y utiliza regresión ridge (glmnet). Escoge
+el parámetro de regularización con validación cruzada y recalcula la matriz de confusión. ¿Obtuviste
+ganancias en clasificación? Checa los nuevos coeficientes y compara con los que obtuviste usando
+regresión logística sin regularización. (Nota: los coeficientes que devuelve glmnet son no estandarizados,
+aún cuando el cálculo se hace estandarizando - si quieres obtener coeficientes estandarizados puedes
+estandarizar a mano antes de correr glmnet).
