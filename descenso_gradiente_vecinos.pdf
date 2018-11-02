@@ -1,0 +1,236 @@
+---
+title: "Predecir valor medio de viviendas - descenso gradiente"
+output: pdf_document
+---
+
+Liga con los datos: <https://archive.ics.uci.edu/ml/machine-learning-databases/housing/>.
+
+Objetivo: Predecir el valor mediano de las viviendas (MEDV).
+
+Primero vamos a separar la muestra en 2 partes: 400 de entrenamiento y el resto de pruebas.
+
+Leemos la base:
+```{r }
+housing<-read.table("https://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.data",
+                    header = FALSE)
+names(housing)<-c("CRIM","ZN","INDUS","CHAS","NOX","RM","AGE","DIS","RAD","TAX","PTRATIO",
+                  "B","LSTAT","MEDV")
+
+```
+
+La base tiene las siguiente variables:
+
+- 1 CRIM      per capita crime rate by town
+
+- 2 ZN        proportion of residential land zoned for lots over 25,000 sq.ft.
+- 3 INDUS     proportion of non-retail business acres per town
+- 4 CHAS      Charles River dummy variable (= 1 if tract bounds river; 0 otherwise)
+- 5 NOX       nitric oxides concentration (parts per 10 million)
+- 6 RM        average number of rooms per dwelling
+- 7 AGE       proportion of owner-occupied units built prior to 1940
+- 8 DIS       weighted distances to five Boston employment centres
+- 9 RAD       index of accessibility to radial highways
+- 10 TAX      full-value property-tax rate per $10,000
+- 11 PTRATIO  pupil-teacher ratio by town
+- 12 B        1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town
+- 13 LSTAT    % lower status of the population
+- 14 MEDV     Median value of owner-occupied homes in $1000's
+
+Datos de entrenamiento y de prueba:
+```{r}
+
+housing$id <- 1:nrow(housing)
+ne<-400
+entrena<-housing[1:ne,]
+prueba<-housing[(ne+1):dim(housing)[1],]
+```
+
+Vamos a ver cada una de las variables en la muestra de prueba:
+```{r}
+summary(prueba)
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+attach(entrena)
+
+normalizacion <- entrena %>% 
+  gather(variable, valor, CRIM:LSTAT) %>%
+  group_by(variable) %>%
+  summarise(media = mean(valor), de = sd(valor))
+
+dat_e_norm <- entrena %>% 
+  gather(variable, valor, CRIM:LSTAT) %>%
+  left_join(normalizacion) %>%
+  mutate(valor_norm = (valor - media)/de) %>%
+  select(id,MEDV, variable, valor_norm) %>%
+  spread(variable, valor_norm) 
+
+```
+Definimios la función de la suma de los errores al cuadrado:
+
+```{r}
+rss_calc <- function(x, y){
+  # x es un data.frame o matrix con entradas
+  # y es la respuesta
+  rss_fun <- function(beta){
+    # esta funcion debe devolver rss
+    y_hat <- as.matrix(cbind(1,x)) %*% beta
+    e <- y - y_hat
+    rss <- 0.5*sum(e^2)
+    rss
+  }
+  rss_fun
+}
+
+```
+
+Definimos la función gradiente:
+
+```{r}
+grad_calc <- function(x, y){
+  # devuelve una función que calcula el gradiente para 
+  # parámetros beta   
+  # x es un data.frame o matrix con entradas
+  # y es la respuesta
+  grad_fun <- function(beta){
+    f_beta <- as.matrix(cbind(1, x)) %*% beta
+    e <- y - f_beta
+    gradiente <- -apply(t(cbind(1,x)) %*% e, 1, sum)
+    names(gradiente)[1] <- 'Intercept'
+    gradiente
+  }
+  grad_fun
+}
+
+
+descenso <- function(n, z_0, eta, h_grad){
+  # esta función calcula n iteraciones de descenso en gradiente 
+  z <- matrix(0,n, length(z_0))
+  z[1, ] <- z_0
+  for(i in 1:(n-1)){
+    z[i+1,] <- z[i,] - eta*h_grad(z[i,])
+  }
+  z
+}
+```
+
+Definimos variables y funciones:
+
+```{r}
+x <- dat_e_norm %>% select(-id, -MEDV)
+y <- dat_e_norm$MEDV
+rss <- rss_calc(x, y)
+grad <- grad_calc(x, y) 
+```
+
+Para el descenso gradiente (se tiene que poner un tamaño de paso mas pequeño):
+
+```{r}
+z_0 <- rep(0, 14) 
+eta <- 0.0001
+n <- 2000
+z <- descenso(n, z_0, eta, grad)
+plot(apply(z, 1, rss),xlab="Iteraciones")
+```
+
+Se definen las betas:
+
+```{r}
+beta <- z[n,]
+```
+
+El error de entrenamiento es:
+
+```{r}
+sqrt(rss(beta)/nrow(dat_e_norm))
+```
+Ahora vamos a evaluarlo con la muestra de prueba:
+
+```{r}
+dat_p_norm <- prueba %>% 
+  gather(variable, valor, CRIM:LSTAT) %>%
+  left_join(normalizacion) %>%
+  mutate(valor_norm = (valor - media)/de) %>%
+  select(id,MEDV, variable, valor_norm) %>%
+  spread(variable, valor_norm) 
+```
+Definimos las variables y funciones de prueba:
+
+```{r}
+y_p <- dat_p_norm$MEDV
+x_p <- dat_p_norm %>% select(-id, -MEDV)
+rss_prueba <- rss_calc(x_p, y_p)
+```
+
+Calculamos la raiz del error cuadrático medio:
+
+```{r}
+sqrt(rss_prueba(beta)/nrow(dat_p_norm))
+```
+
+Graficamos las predicciones contra los observados:
+
+```{r}
+dat_p_norm$pred <- as.matrix(cbind(1, x_p)) %*% beta
+ggplot(dat_p_norm, aes(x=pred, y = MEDV)) + geom_point(color="darkblue") +
+  geom_abline(slope=1, intercept=0,color="red")+theme_minimal()
+```
+
+
+Finalmente, comparamos contra los resultados de la función `lm`:
+
+```{r}
+mod_lineal <- lm(MEDV ~ ., data = dat_e_norm %>% select(-id))
+coefficients(mod_lineal)
+```
+
+Como conclusión, se puede ver que las Betas obtenidas con el descenso gradiente coinciden con los coeficientes del modelo lineal.
+
+## Método vecinos más cercanos
+
+Vamos a utilizar el método de vecinos mas cercanos con $k=1,5,20, 50$ para evaluar su desempeño y determinar cual es la mejor $k$ para reducir el error de prueba:
+
+```{r}
+library(kknn)
+mod_1vmc <- kknn(MEDV ~ ., train = dat_e_norm %>% select(-id),
+                  test = dat_p_norm %>% select(-id), 
+                  k = 1)
+
+(mean((dat_p_norm$MEDV-predict(mod_1vmc))^2))
+
+ggplot(dat_p_norm, aes(x=predict(mod_1vmc), y = MEDV)) + geom_point(color="darkblue") +
+  geom_abline(slope=1, intercept=0,color="red")+theme_minimal()
+
+mod_5vmc <- kknn(MEDV ~ ., train = dat_e_norm %>% select(-id),
+                  test = dat_p_norm %>% select(-id), 
+                  k = 5)
+
+(mean((dat_p_norm$MEDV-predict(mod_5vmc))^2))
+
+ggplot(dat_p_norm, aes(x=predict(mod_5vmc), y = MEDV)) + geom_point(color="darkblue") +
+  geom_abline(slope=1, intercept=0,color="red")+theme_minimal()
+
+mod_20vmc <- kknn(MEDV ~ ., train = dat_e_norm %>% select(-id),
+                  test = dat_p_norm %>% select(-id), 
+                  k = 20)
+
+(mean((dat_p_norm$MEDV-predict(mod_20vmc))^2))
+
+ggplot(dat_p_norm, aes(x=predict(mod_20vmc), y = MEDV)) + geom_point(color="darkblue") +
+  geom_abline(slope=1, intercept=0,color="red")+theme_minimal()
+
+mod_50vmc <- kknn(MEDV ~ ., train = dat_e_norm %>% select(-id),
+                  test = dat_p_norm %>% select(-id), 
+                  k = 50)
+
+(mean((dat_p_norm$MEDV-predict(mod_50vmc))^2))
+
+ggplot(dat_p_norm, aes(x=predict(mod_50vmc), y = MEDV)) + geom_point(color="darkblue") +
+  geom_abline(slope=1, intercept=0,color="red")+theme_minimal()
+
+```
+
+Como conclusión se puede establecer que el modelo con $k=20$ es el que minimiza el error cuadratico medio.

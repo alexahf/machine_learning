@@ -1,0 +1,110 @@
+---
+title: "Redes neuronales"
+
+output: pdf_document
+---
+
+```{r}
+library(ggplot2)
+h <- function(x){
+    exp(x)/(1+exp(x))
+}
+x <- seq(-2,2,0.05)
+p <- h(3 + x- 3*x^2 + 3*cos(4*x))
+set.seed(280572)
+x.2 <- runif(300, -2, 2)
+g.2 <- rbinom(300, 1, h(3 + x.2- 3*x.2^2 + 3*cos(4*x.2)))
+datos <- data.frame(x.2,g.2)
+dat.p <- data.frame(x,p)
+g <- qplot(x,p, geom='line', col='red')
+g + geom_jitter(data = datos, aes(x=x.2,y=g.2), col ='black',
+  position =position_jitter(height=0.05), alpha=0.4)
+```
+
+```{r}
+library(nnet)
+set.seed(12)
+nn <- nnet(g.2 ~ x.2, data=datos, size = 4, decay=0.0, entropy = T)
+```
+
+```{r}
+nn$wts
+
+```
+
+```{r}
+w <- qplot(x, predict(nn, newdata=data.frame(x.2 = x)), geom='line')
+w + geom_jitter(data = datos, aes(x=x.2,y=g.2), col ='black',
+  position =position_jitter(height=0.05), alpha=0.4)+geom_line(data=dat.p,aes(x=x,y=p),col="red")
+```
+
+
+
+Vamos a intentar con el método de optimización:
+
+```{r}
+feed_fow <- function(beta, x){
+  a_1 <- h(beta[1] + beta[2]*x) # calcula variable 1 de capa oculta
+  a_2 <- h(beta[3] + beta[4]*x) # calcula variable 2 de capa oculta
+  a_3 <- h(beta[5] + beta[6]*x)
+  a_4 <- h(beta[7] + beta[8]*x)
+  p <- h(beta[9]+beta[10]*a_1 + beta[11]*a_2 + beta[12]*a_3 + beta[13]*a_4) # calcula capa de salida
+  p
+}
+
+devianza_fun <- function(x, y){
+    # esta función es una fábrica de funciones
+   devianza <- function(beta){
+         p <- feed_fow(beta, x)
+      - 2 * mean(y*log(p) + (1-y)*log(1-p))
+   }
+  devianza
+}
+
+dev <- devianza_fun(x.2, g.2)
+
+set.seed(5)
+salida <- optim(rnorm(13), dev, method='BFGS') # inicializar al azar punto inicial
+salida
+
+beta<-salida$par
+
+```
+
+```{r}
+p.3<-feed_fow(beta,x)
+datos.3<-data.frame(x,p.3)
+
+g + geom_jitter(data = datos, aes(x=x.2,y=g.2), col ='black',
+  position =position_jitter(height=0.05), alpha=0.4)+geom_line(data=datos.3,aes(x=x,y=p.3),col="blue")
+```
+
+Ahora lo vemos con la devianza regularizada:
+
+```{r}
+devianza_reg <- function(x, y, lambda){
+    # esta función es una fábrica de funciones
+   devianza <- function(beta){
+         p <- feed_fow(beta, x)
+         # en esta regularizacion quitamos sesgos, pero puede hacerse también con sesgos.
+        - 2 * mean(y*log(p) + (1-y)*log(1-p)) + lambda*sum(beta[-c(1,3,5)]^2) 
+   }
+  devianza
+}
+
+dev_r <- devianza_reg(x.2, g.2, 0.001) # crea función dev
+set.seed(5)
+salida <- optim(rnorm(13), dev_r, method='BFGS') # inicializar al azar punto inicial
+salida
+```
+
+
+```{r}
+beta<-salida$par
+p.3<-feed_fow(beta,x)
+datos.3<-data.frame(x,p.3)
+
+g + geom_jitter(data = datos, aes(x=x.2,y=g.2), col ='black',
+  position =position_jitter(height=0.05), alpha=0.4)+geom_line(data=datos.3,aes(x=x,y=p.3),col="blue")
+```
+
